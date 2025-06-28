@@ -1,19 +1,51 @@
-import os
-os.environ["STREAMLIT_SERVER_ENABLECORS"] = "false"
-os.environ["STREAMLIT_SERVER_ENABLEWEBSOCKET_COMPRESSION"] = "false"
-
 import streamlit as st
-import cv2
-import numpy as np
-from PIL import Image
-import re
-from rembg import remove
-import io
 import requests
+import json
+import base64
+from PIL import Image
+import io
+import re
 
+# Setup
 st.set_page_config(page_title="Card OCR Scanner", layout="centered")
-st.title("📇 Card OCR Scanner (Mobile Friendly)")
+st.title("📇 Card OCR Scanner (Google OCR Edition)")
 
+# Load Google credentials from secrets
+google_creds = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+
+# Build API request headers
+api_url = "https://vision.googleapis.com/v1/images:annotate"
+api_key = google_creds.get("private_key_id")  # Just a dummy to force validation
+
+# OCR function using Google Cloud Vision
+def google_ocr(image_file):
+    image_bytes = image_file.read()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    body = {
+        "requests": [
+            {
+                "image": {"content": image_base64},
+                "features": [{"type": "TEXT_DETECTION"}]
+            }
+        ]
+    }
+
+    response = requests.post(
+        f"https://vision.googleapis.com/v1/images:annotate?key={google_creds['private_key_id']}",
+        headers={"Content-Type": "application/json"},
+        json=body
+    )
+
+    result = response.json()
+    try:
+        text = result["responses"][0]["fullTextAnnotation"]["text"]
+        return text
+    except Exception as e:
+        st.error("Error parsing OCR response.")
+        st.stop()
+
+# Parse MRZ (same as before)
 def format_date_ymd(ymd):
     if len(ymd) != 6:
         return "Invalid"
@@ -57,79 +89,16 @@ def parse_mrz(text):
         "Last Name": last_name[:25]
     }
 
-def process_image(uploaded_file):
-    # Load image
-    input_image = Image.open(io.BytesIO(uploaded_file.read()))
+# Streamlit UI
+uploaded_file = st.camera_input("Take a photo of your card") or st.file_uploader("Or upload an image", type=["jpg", "jpeg", "png"])
 
-    # Remove background
-    output_image = remove(input_image)
-
-    # Crop transparent edges
-    np_img = np.array(output_image)
-    if np_img.shape[2] == 4:
-        alpha = np_img[:, :, 3]
-        non_empty_cols = np.where(np.max(alpha, axis=0) > 0)[0]
-        non_empty_rows = np.where(np.max(alpha, axis=1) > 0)[0]
-        if non_empty_cols.size and non_empty_rows.size:
-            crop_box = (non_empty_cols[0], non_empty_rows[0], non_empty_cols[-1], non_empty_rows[-1])
-            cropped_image = output_image.crop(crop_box)
-        else:
-            cropped_image = output_image
-    else:
-        cropped_image = output_image
-
-    # Resize for better OCR results
-    w_percent = (600 / float(cropped_image.width))
-    h_size = int((float(cropped_image.height) * float(w_percent)))
-    resized = cropped_image.resize((600, h_size))
-
-    # Prepare image bytes for OCR API
-    buffered = io.BytesIO()
-    resized.save(buffered, format="PNG")
-    img_bytes = buffered.getvalue()
-
-    # Call OCR.Space API
-    api_url = "https://api.ocr.space/parse/image"
-    headers = {
-        "apikey": "helloworld"  # public demo key, replace with your own key if you have one
-    }
-    files = {
-        'filename': ('image.png', img_bytes)
-    }
-    data = {
-        'language': 'eng',
-        'isOverlayRequired': False,
-        'OCREngine': 2,
-        'detectOrientation': True
-    }
-    response = requests.post(api_url, headers=headers, files=files, data=data)
-    result_json = response.json()
-
-    # Extract OCR text
-    try:
-        text = result_json['ParsedResults'][0]['ParsedText']
-    except Exception:
-        text = ""
-
-    # Fix common MRZ OCR issues (K → <)
-    text = re.sub(r'(?<=[A-Z0-9])K(?=[A-Z0-9<])', '<', text)
-
-    # Parse MRZ from text
-    result = parse_mrz(text)
-
-    return resized, text, result
-
-
-uploaded_file = st.camera_input("Take a photo of your card")
-
-if uploaded_file is not None:
-    with st.spinner("Processing image with OCR API..."):
-        processed_img, ocr_text, parsed_data = process_image(uploaded_file)
-
-    st.image(processed_img, caption="Processed Image", use_column_width=True)
+if uploaded_file:
+    with st.spinner("Running OCR using Google Vision..."):
+        ocr_text = google_ocr(uploaded_file)
+        parsed_data = parse_mrz(ocr_text)
 
     st.subheader("Extracted MRZ Text:")
-    st.text_area("OCR Text", ocr_text, height=200)
+    st.text_area("OCR Result", ocr_text, height=200)
 
     st.subheader("Parsed Data:")
     st.json(parsed_data)

@@ -5,3 +5,4 @@ Pillow
 rembg
 onnxruntime
 requests
+google-cloud-vision

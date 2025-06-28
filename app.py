@@ -1,4 +1,3 @@
-%%writefile app.py
 import os
 os.environ["STREAMLIT_SERVER_ENABLECORS"] = "false"
 os.environ["STREAMLIT_SERVER_ENABLEWEBSOCKET_COMPRESSION"] = "false"

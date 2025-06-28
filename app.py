@@ -61,7 +61,7 @@ def parse_mrz(text):
 
 # --- New function to call OCR.space API ---
 
-OCR_SPACE_API_KEY = "your_api_key_here"  # Replace with your OCR.space API key
+OCR_SPACE_API_KEY = "K83639998988957"  # Replace with your OCR.space API key
 
 def ocr_space_api(image_bytes):
     payload = {

@@ -3,16 +3,18 @@ os.environ["STREAMLIT_SERVER_ENABLECORS"] = "false"
 os.environ["STREAMLIT_SERVER_ENABLEWEBSOCKET_COMPRESSION"] = "false"
 
 import streamlit as st
-import pytesseract
 import cv2
 import numpy as np
 from PIL import Image
 import re
 from rembg import remove
 import io
+import requests
 
 st.set_page_config(page_title="Card OCR Scanner", layout="centered")
 st.title("📇 Card OCR Scanner (Mobile Friendly)")
+
+# --- Your existing MRZ parsing functions ---
 
 def format_date_ymd(ymd):
     if len(ymd) != 6:
@@ -57,6 +59,30 @@ def parse_mrz(text):
         "Last Name": last_name[:25]
     }
 
+# --- New function to call OCR.space API ---
+
+OCR_SPACE_API_KEY = "your_api_key_here"  # Replace with your OCR.space API key
+
+def ocr_space_api(image_bytes):
+    payload = {
+        'apikey': OCR_SPACE_API_KEY,
+        'language': 'eng',
+        'isOverlayRequired': False,
+        'detectOrientation': True,
+        'OCREngine': 2
+    }
+    files = {
+        'filename': ('image.jpg', image_bytes)
+    }
+    response = requests.post('https://api.ocr.space/parse/image',
+                             data=payload,
+                             files=files)
+    result = response.json()
+    if result.get('IsErroredOnProcessing'):
+        return None, result.get('ErrorMessage')
+    parsed_text = result['ParsedResults'][0]['ParsedText']
+    return parsed_text, None
+
 def process_image(uploaded_file):
     input_image = Image.open(io.BytesIO(uploaded_file.read()))
 
@@ -79,16 +105,17 @@ def process_image(uploaded_file):
     h_size = int((float(cropped_image.height) * float(w_percent)))
     resized = cropped_image.resize((600, h_size))
 
-    image_np = np.array(resized)
-    image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+    # Convert resized image to bytes for API call
+    buf = io.BytesIO()
+    resized.save(buf, format='JPEG')
+    image_bytes = buf.getvalue()
 
-    gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, 11, 17, 17)
-    gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    # Call OCR API instead of pytesseract
+    text, error = ocr_space_api(image_bytes)
+    if error:
+        return resized, "", {"error": error}
 
-    custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
-    text = pytesseract.image_to_string(gray, config=custom_config)
-
+    # Clean OCR output similar to your original approach
     text = re.sub(r'(?<=[A-Z0-9])K(?=[A-Z0-9<])', '<', text)
 
     result = parse_mrz(text)

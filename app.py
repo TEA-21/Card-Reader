@@ -14,8 +14,6 @@ import requests
 st.set_page_config(page_title="Card OCR Scanner", layout="centered")
 st.title("📇 Card OCR Scanner (Mobile Friendly)")
 
-# --- Your existing MRZ parsing functions ---
-
 def format_date_ymd(ymd):
     if len(ymd) != 6:
         return "Invalid"
@@ -59,35 +57,14 @@ def parse_mrz(text):
         "Last Name": last_name[:25]
     }
 
-# --- New function to call OCR.space API ---
-
-OCR_SPACE_API_KEY = "K83639998988957"  # Replace with your OCR.space API key
-
-def ocr_space_api(image_bytes):
-    payload = {
-        'apikey': OCR_SPACE_API_KEY,
-        'language': 'eng',
-        'isOverlayRequired': False,
-        'detectOrientation': True,
-        'OCREngine': 2
-    }
-    files = {
-        'filename': ('image.jpg', image_bytes)
-    }
-    response = requests.post('https://api.ocr.space/parse/image',
-                             data=payload,
-                             files=files)
-    result = response.json()
-    if result.get('IsErroredOnProcessing'):
-        return None, result.get('ErrorMessage')
-    parsed_text = result['ParsedResults'][0]['ParsedText']
-    return parsed_text, None
-
 def process_image(uploaded_file):
+    # Load image
     input_image = Image.open(io.BytesIO(uploaded_file.read()))
 
+    # Remove background
     output_image = remove(input_image)
 
+    # Crop transparent edges
     np_img = np.array(output_image)
     if np_img.shape[2] == 4:
         alpha = np_img[:, :, 3]
@@ -101,31 +78,52 @@ def process_image(uploaded_file):
     else:
         cropped_image = output_image
 
+    # Resize for better OCR results
     w_percent = (600 / float(cropped_image.width))
     h_size = int((float(cropped_image.height) * float(w_percent)))
     resized = cropped_image.resize((600, h_size))
 
-    # Convert resized image to bytes for API call
-    buf = io.BytesIO()
-    resized.save(buf, format='JPEG')
-    image_bytes = buf.getvalue()
+    # Prepare image bytes for OCR API
+    buffered = io.BytesIO()
+    resized.save(buffered, format="PNG")
+    img_bytes = buffered.getvalue()
 
-    # Call OCR API instead of pytesseract
-    text, error = ocr_space_api(image_bytes)
-    if error:
-        return resized, "", {"error": error}
+    # Call OCR.Space API
+    api_url = "https://api.ocr.space/parse/image"
+    headers = {
+        "apikey": "helloworld"  # public demo key, replace with your own key if you have one
+    }
+    files = {
+        'filename': ('image.png', img_bytes)
+    }
+    data = {
+        'language': 'eng',
+        'isOverlayRequired': False,
+        'OCREngine': 2,
+        'detectOrientation': True
+    }
+    response = requests.post(api_url, headers=headers, files=files, data=data)
+    result_json = response.json()
 
-    # Clean OCR output similar to your original approach
+    # Extract OCR text
+    try:
+        text = result_json['ParsedResults'][0]['ParsedText']
+    except Exception:
+        text = ""
+
+    # Fix common MRZ OCR issues (K → <)
     text = re.sub(r'(?<=[A-Z0-9])K(?=[A-Z0-9<])', '<', text)
 
+    # Parse MRZ from text
     result = parse_mrz(text)
 
     return resized, text, result
 
+
 uploaded_file = st.camera_input("Take a photo of your card")
 
 if uploaded_file is not None:
-    with st.spinner("Processing image..."):
+    with st.spinner("Processing image with OCR API..."):
         processed_img, ocr_text, parsed_data = process_image(uploaded_file)
 
     st.image(processed_img, caption="Processed Image", use_column_width=True)

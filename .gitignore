@@ -1,0 +1,24 @@
+# Python cache and temp files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+
+# Virtual environment folders (if you created any)
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter Notebook checkpoints (if any)
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files (optional)
+.vscode/
+.idea/
